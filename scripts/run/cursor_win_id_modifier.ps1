@@ -105,16 +105,49 @@ function Get-CursorVersion {
             "$env:LOCALAPPDATA\cursor\resources\app\package.json"
         ))
 
+        # 用于存储找到的所有版本信息
+        $foundVersions = @()
+
         # 遍历所有可能的路径
         foreach ($path in $possiblePaths) {
             if (Test-Path $path) {
-                $packageJson = Get-Content $path -Raw | ConvertFrom-Json
-                if ($packageJson.version) {
-                    Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
-                    Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $path"
-                    return $packageJson.version
+                try {
+                    $packageJson = Get-Content $path -Raw | ConvertFrom-Json
+                    if ($packageJson.version) {
+                        # 将版本信息和路径一起存储
+                        $foundVersions += @{
+                            Version = $packageJson.version
+                            Path = $path
+                            VersionObject = [System.Version]::new($packageJson.version.TrimStart('v'))
+                        }
+                    }
+                } catch {
+                    Write-Host "$YELLOW[警告]$NC 解析 $path 时出错: $_"
+                    continue
                 }
             }
+        }
+
+        # 如果找到多个版本
+        if ($foundVersions.Count -gt 0) {
+            # 按版本号排序，选择最高版本
+            $highestVersion = $foundVersions | 
+                Sort-Object -Property { $_.VersionObject } -Descending | 
+                Select-Object -First 1
+
+            Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($highestVersion.Version)"
+            Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $($highestVersion.Path)"
+
+            # 如果找到多个版本，显示所有版本信息
+            if ($foundVersions.Count -gt 1) {
+                Write-Host "$YELLOW[提示]$NC 检测到多个 Cursor 版本:"
+                $foundVersions | ForEach-Object {
+                    Write-Host "  - 版本: v$($_.Version) (路径: $($_.Path))"
+                }
+                Write-Host "$GREEN[信息]$NC 已自动选择最高版本: v$($highestVersion.Version)"
+            }
+
+            return $highestVersion.Version
         }
 
         # 如果上述方法都失败，尝试搜索所有驱动器
