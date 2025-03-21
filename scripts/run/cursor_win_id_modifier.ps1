@@ -79,16 +79,31 @@ function Get-CursorVersion {
         }
 
         # 定义可能的安装路径
-        $possiblePaths = @(
-            # 如果从注册表找到路径，添加到搜索列表
-            if ($cursorPath) { Join-Path $cursorPath "resources\app\package.json" },
-            # 默认路径
+        $possiblePaths = [System.Collections.ArrayList]@()
+
+        # 如果从注册表找到路径，添加到搜索列表
+        if ($cursorPath) {
+            $possiblePaths.Add((Join-Path $cursorPath "resources\app\package.json")) | Out-Null
+        }
+
+        # 获取所有可用的驱动器盘符
+        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | Select-Object -ExpandProperty Root
+
+        # 为每个驱动器添加可能的安装路径
+        foreach ($drive in $drives) {
+            $possiblePaths.AddRange(@(
+                "${drive}Program Files\Cursor\resources\app\package.json",
+                "${drive}Program Files (x86)\Cursor\resources\app\package.json",
+                "${drive}Program Files\cursor\resources\app\package.json",
+                "${drive}Program Files (x86)\cursor\resources\app\package.json"
+            ))
+        }
+
+        # 添加其他默认路径
+        $possiblePaths.AddRange(@(
             "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json",
-            "$env:LOCALAPPDATA\cursor\resources\app\package.json",
-            # 常见自定义路径
-            "C:\Program Files\Cursor\resources\app\package.json",
-            "C:\Program Files (x86)\Cursor\resources\app\package.json"
-        )
+            "$env:LOCALAPPDATA\cursor\resources\app\package.json"
+        ))
 
         # 遍历所有可能的路径
         foreach ($path in $possiblePaths) {
