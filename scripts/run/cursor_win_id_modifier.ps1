@@ -83,10 +83,25 @@ function Get-CursorVersion {
                 try {
                     $packageJson = Get-Content $path -Raw | ConvertFrom-Json
                     if ($packageJson.version) {
+                        # 修复版本比较 - 正确处理版本字符串
+                        $versionStr = $packageJson.version -replace '-.*$', ''
+                        # 拆分版本号为数组，并确保它们是整数
+                        $versionParts = $versionStr.Split('.') | ForEach-Object { 
+                            try { [int]$_ } catch { 0 } 
+                        }
+                        
+                        # 确保至少有三个部分(主版本,次版本,修订版本)
+                        while ($versionParts.Count -lt 3) {
+                            $versionParts += 0
+                        }
+                        
+                        # 创建比较用的数值
+                        $versionValue = $versionParts[0] * 10000 + $versionParts[1] * 100 + $versionParts[2]
+                        
                         $foundVersions += [PSCustomObject]@{
                             Version = $packageJson.version
                             Path = $path
-                            VersionObj = [System.Version]::new($packageJson.version -replace '-.*$', '')
+                            VersionValue = $versionValue
                         }
                         Write-Host "$GREEN[信息]$NC 检测到 Cursor 版本: v$($packageJson.version) (路径: $path)"
                     }
@@ -104,7 +119,7 @@ function Get-CursorVersion {
         }
 
         # 找到最高版本
-        $highestVersion = $foundVersions | Sort-Object -Property VersionObj -Descending | Select-Object -First 1
+        $highestVersion = $foundVersions | Sort-Object -Property VersionValue -Descending | Select-Object -First 1
         
         # 显示使用的版本
         Write-Host "$GREEN[信息]$NC 将使用最高版本: v$($highestVersion.Version) (路径: $($highestVersion.Path))"
