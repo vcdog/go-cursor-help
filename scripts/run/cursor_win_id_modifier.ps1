@@ -50,141 +50,66 @@ Write-Host ""
 # 获取并显示 Cursor 版本
 function Get-CursorVersion {
     try {
-        # 从注册表获取安装路径
-        $registryPaths = @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Cursor.exe",
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        # 定义可能的安装路径模板
+        $pathTemplates = @(
+            "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json",
+            "$env:LOCALAPPDATA\cursor\resources\app\package.json",
+            "${env:ProgramFiles}\cursor\resources\app\package.json",
+            "${env:ProgramFiles(x86)}\cursor\resources\app\package.json"
         )
 
-        $cursorPath = $null
-        
-        # 遍历注册表路径
-        foreach ($regPath in $registryPaths) {
-            if (Test-Path $regPath) {
-                $apps = Get-ItemProperty $regPath -ErrorAction SilentlyContinue
-                if ($regPath -like "*App Paths*") {
-                    if ($apps.'(Default)') {
-                        $cursorPath = Split-Path $apps.'(Default)' -Parent
-                        break
-                    }
-                } else {
-                    $cursor = $apps | Where-Object { $_.DisplayName -like "*Cursor*" }
-                    if ($cursor -and $cursor.InstallLocation) {
-                        $cursorPath = $cursor.InstallLocation
-                        break
-                    }
-                }
-            }
-        }
+        # 获取所有驱动器
+        $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
 
-        # 定义可能的安装路径
-        $possiblePaths = [System.Collections.ArrayList]@()
-
-        # 如果从注册表找到路径，添加到搜索列表
-        if ($cursorPath -and $cursorPath.Trim()) {
-            $packageJsonPath = Join-Path $cursorPath "resources\app\package.json"
-            if ($packageJsonPath) {
-                $possiblePaths.Add($packageJsonPath) | Out-Null
-            }
-        }
-
-        # 获取所有可用的驱动器盘符
-        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 -and $_.Root } | Select-Object -ExpandProperty Root
-
-        # 为每个驱动器添加可能的安装路径
+        # 为每个驱动器添加可能的路径
+        $additionalPaths = @()
         foreach ($drive in $drives) {
-            if ($drive -and $drive.Trim()) {
-                $drivePaths = @(
-                    "${drive}Program Files\Cursor\resources\app\package.json",
-                    "${drive}Program Files (x86)\Cursor\resources\app\package.json",
+            if ($drive -ne $env:SystemDrive) {
+                $additionalPaths += @(
                     "${drive}Program Files\cursor\resources\app\package.json",
-                    "${drive}Program Files (x86)\cursor\resources\app\package.json"
-                ) | Where-Object { $_ -and $_.Trim() }
-                
-                $possiblePaths.AddRange($drivePaths)
+                    "${drive}Program Files (x86)\cursor\resources\app\package.json",
+                    "${drive}cursor\resources\app\package.json"
+                )
             }
         }
 
-        # 添加其他默认路径
-        $defaultPaths = @(
-            "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json",
-            "$env:LOCALAPPDATA\cursor\resources\app\package.json"
-        ) | Where-Object { $_ -and $_.Trim() }
-
-        $possiblePaths.AddRange($defaultPaths)
-
-        # 添加调试信息
-        Write-Host "$BLUE[调试]$NC 正在检查以下路径："
-        foreach ($path in $possiblePaths) {
-            Write-Host "  - $path"
-        }
-
-        # 用于存储找到的所有版本信息
+        # 合并所有可能的路径
+        $allPaths = $pathTemplates + $additionalPaths
         $foundVersions = @()
 
-        # 遍历所有可能的路径
-        foreach ($path in $possiblePaths) {
+        # 检查每个路径
+        foreach ($path in $allPaths) {
             if (Test-Path $path) {
                 try {
                     $packageJson = Get-Content $path -Raw | ConvertFrom-Json
                     if ($packageJson.version) {
-                        # 将版本信息和路径一起存储
-                        $foundVersions += @{
+                        $foundVersions += [PSCustomObject]@{
                             Version = $packageJson.version
                             Path = $path
-                            VersionObject = [System.Version]::new($packageJson.version.TrimStart('v'))
+                            VersionObj = [System.Version]::new($packageJson.version -replace '-.*$', '')
                         }
+                        Write-Host "$GREEN[信息]$NC 检测到 Cursor 版本: v$($packageJson.version) (路径: $path)"
                     }
                 } catch {
-                    Write-Host "$YELLOW[警告]$NC 解析 $path 时出错: $_"
-                    continue
+                    Write-Host "$YELLOW[警告]$NC 无法解析 package.json: $path, 错误: $_"
                 }
             }
         }
 
-        # 如果找到多个版本
-        if ($foundVersions.Count -gt 0) {
-            # 按版本号排序，选择最高版本
-            $highestVersion = $foundVersions | 
-                Sort-Object -Property { $_.VersionObject } -Descending | 
-                Select-Object -First 1
-
-            Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($highestVersion.Version)"
-            Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $($highestVersion.Path)"
-
-            # 如果找到多个版本，显示所有版本信息
-            if ($foundVersions.Count -gt 1) {
-                Write-Host "$YELLOW[提示]$NC 检测到多个 Cursor 版本:"
-                $foundVersions | ForEach-Object {
-                    Write-Host "  - 版本: v$($_.Version) (路径: $($_.Path))"
-                }
-                Write-Host "$GREEN[信息]$NC 已自动选择最高版本: v$($highestVersion.Version)"
-            }
-
-            return $highestVersion.Version
+        # 检查是否找到任何版本
+        if ($foundVersions.Count -eq 0) {
+            Write-Host "$YELLOW[警告]$NC 未检测到任何 Cursor 版本"
+            Write-Host "$YELLOW[提示]$NC 请确保 Cursor 已正确安装"
+            return $null
         }
 
-        # 如果上述方法都失败，尝试搜索所有驱动器
-        Write-Host "$YELLOW[警告]$NC 在常见路径未找到 Cursor，正在搜索所有驱动器..."
+        # 找到最高版本
+        $highestVersion = $foundVersions | Sort-Object -Property VersionObj -Descending | Select-Object -First 1
         
-        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 }
-        foreach ($drive in $drives) {
-            $searchPath = Join-Path $drive.Root "**\cursor\resources\app\package.json"
-            $found = Get-ChildItem -Path $searchPath -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-                $packageJson = Get-Content $found.FullName -Raw | ConvertFrom-Json
-                if ($packageJson.version) {
-                    Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
-                    Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $($found.FullName)"
-                    return $packageJson.version
-                }
-            }
-        }
-
-        Write-Host "$YELLOW[警告]$NC 无法检测到 Cursor 版本"
-        Write-Host "$YELLOW[提示]$NC 请确保 Cursor 已正确安装，或手动指定安装路径"
-        return $null
+        # 显示使用的版本
+        Write-Host "$GREEN[信息]$NC 将使用最高版本: v$($highestVersion.Version) (路径: $($highestVersion.Path))"
+        
+        return $highestVersion.Version
     }
     catch {
         Write-Host "$RED[错误]$NC 获取 Cursor 版本失败: $_"
