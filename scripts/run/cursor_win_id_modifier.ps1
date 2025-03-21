@@ -50,29 +50,77 @@ Write-Host ""
 # 获取并显示 Cursor 版本
 function Get-CursorVersion {
     try {
-        # 主要检测路径
-        $packagePath = "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json"
+        # 从注册表获取安装路径
+        $registryPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Cursor.exe",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        )
+
+        $cursorPath = $null
         
-        if (Test-Path $packagePath) {
-            $packageJson = Get-Content $packagePath -Raw | ConvertFrom-Json
-            if ($packageJson.version) {
-                Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
-                return $packageJson.version
+        # 遍历注册表路径
+        foreach ($regPath in $registryPaths) {
+            if (Test-Path $regPath) {
+                $apps = Get-ItemProperty $regPath -ErrorAction SilentlyContinue
+                if ($regPath -like "*App Paths*") {
+                    if ($apps.'(Default)') {
+                        $cursorPath = Split-Path $apps.'(Default)' -Parent
+                        break
+                    }
+                } else {
+                    $cursor = $apps | Where-Object { $_.DisplayName -like "*Cursor*" }
+                    if ($cursor -and $cursor.InstallLocation) {
+                        $cursorPath = $cursor.InstallLocation
+                        break
+                    }
+                }
             }
         }
 
-        # 备用路径检测
-        $altPath = "$env:LOCALAPPDATA\cursor\resources\app\package.json"
-        if (Test-Path $altPath) {
-            $packageJson = Get-Content $altPath -Raw | ConvertFrom-Json
-            if ($packageJson.version) {
-                Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
-                return $packageJson.version
+        # 定义可能的安装路径
+        $possiblePaths = @(
+            # 如果从注册表找到路径，添加到搜索列表
+            if ($cursorPath) { Join-Path $cursorPath "resources\app\package.json" },
+            # 默认路径
+            "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json",
+            "$env:LOCALAPPDATA\cursor\resources\app\package.json",
+            # 常见自定义路径
+            "C:\Program Files\Cursor\resources\app\package.json",
+            "C:\Program Files (x86)\Cursor\resources\app\package.json"
+        )
+
+        # 遍历所有可能的路径
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $packageJson = Get-Content $path -Raw | ConvertFrom-Json
+                if ($packageJson.version) {
+                    Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
+                    Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $path"
+                    return $packageJson.version
+                }
+            }
+        }
+
+        # 如果上述方法都失败，尝试搜索所有驱动器
+        Write-Host "$YELLOW[警告]$NC 在常见路径未找到 Cursor，正在搜索所有驱动器..."
+        
+        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 }
+        foreach ($drive in $drives) {
+            $searchPath = Join-Path $drive.Root "**\cursor\resources\app\package.json"
+            $found = Get-ChildItem -Path $searchPath -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                $packageJson = Get-Content $found.FullName -Raw | ConvertFrom-Json
+                if ($packageJson.version) {
+                    Write-Host "$GREEN[信息]$NC 当前安装的 Cursor 版本: v$($packageJson.version)"
+                    Write-Host "$BLUE[调试]$NC 找到 package.json 路径: $($found.FullName)"
+                    return $packageJson.version
+                }
             }
         }
 
         Write-Host "$YELLOW[警告]$NC 无法检测到 Cursor 版本"
-        Write-Host "$YELLOW[提示]$NC 请确保 Cursor 已正确安装"
+        Write-Host "$YELLOW[提示]$NC 请确保 Cursor 已正确安装，或手动指定安装路径"
         return $null
     }
     catch {
