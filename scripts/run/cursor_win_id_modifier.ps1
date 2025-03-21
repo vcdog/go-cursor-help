@@ -82,28 +82,43 @@ function Get-CursorVersion {
         $possiblePaths = [System.Collections.ArrayList]@()
 
         # 如果从注册表找到路径，添加到搜索列表
-        if ($cursorPath) {
-            $possiblePaths.Add((Join-Path $cursorPath "resources\app\package.json")) | Out-Null
+        if ($cursorPath -and $cursorPath.Trim()) {
+            $packageJsonPath = Join-Path $cursorPath "resources\app\package.json"
+            if ($packageJsonPath) {
+                $possiblePaths.Add($packageJsonPath) | Out-Null
+            }
         }
 
         # 获取所有可用的驱动器盘符
-        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | Select-Object -ExpandProperty Root
+        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 -and $_.Root } | Select-Object -ExpandProperty Root
 
         # 为每个驱动器添加可能的安装路径
         foreach ($drive in $drives) {
-            $possiblePaths.AddRange(@(
-                "${drive}Program Files\Cursor\resources\app\package.json",
-                "${drive}Program Files (x86)\Cursor\resources\app\package.json",
-                "${drive}Program Files\cursor\resources\app\package.json",
-                "${drive}Program Files (x86)\cursor\resources\app\package.json"
-            ))
+            if ($drive -and $drive.Trim()) {
+                $drivePaths = @(
+                    "${drive}Program Files\Cursor\resources\app\package.json",
+                    "${drive}Program Files (x86)\Cursor\resources\app\package.json",
+                    "${drive}Program Files\cursor\resources\app\package.json",
+                    "${drive}Program Files (x86)\cursor\resources\app\package.json"
+                ) | Where-Object { $_ -and $_.Trim() }
+                
+                $possiblePaths.AddRange($drivePaths)
+            }
         }
 
         # 添加其他默认路径
-        $possiblePaths.AddRange(@(
+        $defaultPaths = @(
             "$env:LOCALAPPDATA\Programs\cursor\resources\app\package.json",
             "$env:LOCALAPPDATA\cursor\resources\app\package.json"
-        ))
+        ) | Where-Object { $_ -and $_.Trim() }
+
+        $possiblePaths.AddRange($defaultPaths)
+
+        # 添加调试信息
+        Write-Host "$BLUE[调试]$NC 正在检查以下路径："
+        foreach ($path in $possiblePaths) {
+            Write-Host "  - $path"
+        }
 
         # 用于存储找到的所有版本信息
         $foundVersions = @()
