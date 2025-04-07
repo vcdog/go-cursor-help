@@ -510,6 +510,94 @@ try {
                 return
             }
 
+            # 处理 inno_updater 文件
+            try {
+                # 检查可能的 inno_updater 位置
+                $innoUpdaterLocations = @(
+                    "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
+                    "$env:LOCALAPPDATA\cursor-updater\inno_updater",
+                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
+                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater",
+                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
+                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater"
+                )
+                
+                foreach ($location in $innoUpdaterLocations) {
+                    if (Test-Path $location) {
+                        Write-Host "$YELLOW[警告]$NC 发现 inno_updater 文件: $location"
+                        
+                        # 尝试删除文件
+                        try {
+                            Remove-Item -Path $location -Force -ErrorAction Stop
+                            Write-Host "$GREEN[信息]$NC 成功删除 inno_updater 文件"
+                        }
+                        catch {
+                            Write-Host "$RED[错误]$NC 无法删除 inno_updater 文件，尝试禁用..."
+                            
+                            # 如果无法删除，尝试创建空文件并设置为只读
+                            try {
+                                # 先备份原始文件（如果需要）
+                                $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+                                Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
+                                
+                                # 清空文件内容
+                                Set-Content -Path $location -Value "" -Force
+                                
+                                # 设置为只读
+                                Set-ItemProperty -Path $location -Name IsReadOnly -Value $true
+                                
+                                # 设置权限
+                                $innoResult = Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
+                                
+                                Write-Host "$GREEN[信息]$NC 成功禁用 inno_updater 文件"
+                            }
+                            catch {
+                                Write-Host "$RED[错误]$NC 无法禁用 inno_updater 文件: $_"
+                            }
+                        }
+                    }
+                }
+                
+                # 创建阻止文件在各个可能位置
+                foreach ($location in $innoUpdaterLocations) {
+                    if (-not (Test-Path $location)) {
+                        $folder = Split-Path -Path $location -Parent
+                        
+                        # 确保父文件夹存在
+                        if (-not (Test-Path $folder)) {
+                            try {
+                                New-Item -Path $folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                            }
+                            catch {
+                                # 忽略错误并继续
+                                continue
+                            }
+                        }
+                        
+                        try {
+                            # 创建空文件
+                            New-Item -Path $location -ItemType File -Force -ErrorAction Stop | Out-Null
+                            
+                            # 设置为只读
+                            Set-ItemProperty -Path $location -Name IsReadOnly -Value $true
+                            
+                            # 设置权限
+                            Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru | Out-Null
+                            
+                            Write-Host "$GREEN[信息]$NC 成功创建阻止文件: $location"
+                        }
+                        catch {
+                            Write-Host "$YELLOW[警告]$NC 无法创建阻止文件 $location : $_"
+                        }
+                    }
+                }
+                
+                Write-Host "$GREEN[信息]$NC inno_updater 处理完成"
+            }
+            catch {
+                Write-Host "$RED[错误]$NC 处理 inno_updater 时发生错误: $_"
+            }
+
             # 验证设置
             try {
                 $fileInfo = Get-ItemProperty $updaterPath
