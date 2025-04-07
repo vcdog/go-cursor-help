@@ -523,7 +523,12 @@ try {
                     "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
                     "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater",
                     "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
-                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater"
+                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater",
+                    # 添加 Cursor 主程序目录下的 tools 位置
+                    "$env:LOCALAPPDATA\Programs\cursor\tools\inno_updater.exe",
+                    "$env:LOCALAPPDATA\Programs\cursor\tools\inno_updater",
+                    "$env:LOCALAPPDATA\cursor\tools\inno_updater.exe",
+                    "$env:LOCALAPPDATA\cursor\tools\inno_updater"
                 )
                 
                 # 添加所有可能的驱动器上的 Cursor tools 目录
@@ -533,17 +538,29 @@ try {
                         "${drive}Program Files\cursor\tools\inno_updater.exe",
                         "${drive}Program Files\cursor\tools\inno_updater",
                         "${drive}Program Files (x86)\cursor\tools\inno_updater.exe",
-                        "${drive}Program Files (x86)\cursor\tools\inno_updater"
+                        "${drive}Program Files (x86)\cursor\tools\inno_updater",
+                        # 添加主程序目录下的 tools
+                        "${drive}Program Files\cursor\resources\app\tools\inno_updater.exe",
+                        "${drive}Program Files\cursor\resources\app\tools\inno_updater",
+                        "${drive}Program Files (x86)\cursor\resources\app\tools\inno_updater.exe",
+                        "${drive}Program Files (x86)\cursor\resources\app\tools\inno_updater"
                     )
                     
                     # 自定义安装位置的常见情况
                     $innoUpdaterLocations += @(
                         "${drive}cursor\tools\inno_updater.exe",
                         "${drive}cursor\tools\inno_updater",
+                        "${drive}cursor\resources\app\tools\inno_updater.exe",
+                        "${drive}cursor\resources\app\tools\inno_updater",
                         "${drive}Apps\cursor\tools\inno_updater.exe",
                         "${drive}Apps\cursor\tools\inno_updater",
                         "${drive}Software\cursor\tools\inno_updater.exe",
-                        "${drive}Software\cursor\tools\inno_updater"
+                        "${drive}Software\cursor\tools\inno_updater",
+                        # 添加其他可能的自定义位置
+                        "${drive}Applications\cursor\tools\inno_updater.exe",
+                        "${drive}Applications\cursor\tools\inno_updater",
+                        "${drive}Programs\cursor\tools\inno_updater.exe",
+                        "${drive}Programs\cursor\tools\inno_updater"
                     )
                 }
                 
@@ -551,24 +568,36 @@ try {
                 
                 # 查找并处理现有的 inno_updater 文件
                 $foundFiles = @()
+                Write-Host ""
+                Write-Host "$YELLOW[警告]$NC 开始查找 inno_updater 文件..."
+                Write-Host ""
+                
                 foreach ($location in $innoUpdaterLocations) {
                     if (Test-Path $location) {
                         $foundFiles += $location
-                        Write-Host "$YELLOW[警告]$NC 发现 inno_updater 文件: $location"
+                        $fileInfo = Get-Item $location
+                        Write-Host "$YELLOW----------------------------------------$NC"
+                        Write-Host "$YELLOW[发现]$NC inno_updater 文件:"
+                        Write-Host "路径: $location"
+                        Write-Host "大小: $([math]::Round($fileInfo.Length/1KB, 2)) KB"
+                        Write-Host "修改时间: $($fileInfo.LastWriteTime)"
+                        Write-Host "$YELLOW----------------------------------------$NC"
+                        Write-Host ""
                         
                         # 尝试删除文件
                         try {
                             Remove-Item -Path $location -Force -ErrorAction Stop
-                            Write-Host "$GREEN[信息]$NC 成功删除 inno_updater 文件"
+                            Write-Host "$GREEN[信息]$NC 成功删除 inno_updater 文件: $location"
                         }
                         catch {
-                            Write-Host "$RED[错误]$NC 无法删除 inno_updater 文件，尝试禁用..."
+                            Write-Host "$RED[错误]$NC 无法删除 inno_updater 文件，尝试禁用: $location"
                             
                             # 如果无法删除，尝试创建空文件并设置为只读
                             try {
                                 # 先备份原始文件（如果需要）
                                 $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Split-Path -Leaf $location)"
                                 Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
+                                Write-Host "$GREEN[信息]$NC 已备份原始文件到: $backupLocation"
                                 
                                 # 清空文件内容
                                 Set-Content -Path $location -Value "" -Force
@@ -579,20 +608,27 @@ try {
                                 # 设置权限
                                 $innoResult = Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
                                 
-                                Write-Host "$GREEN[信息]$NC 成功禁用 inno_updater 文件"
+                                Write-Host "$GREEN[信息]$NC 成功禁用 inno_updater 文件: $location"
                             }
                             catch {
-                                Write-Host "$RED[错误]$NC 无法禁用 inno_updater 文件: $_"
+                                Write-Host "$RED[错误]$NC 无法禁用 inno_updater 文件: $location"
+                                Write-Host "错误信息: $_"
                             }
                         }
                     }
                 }
                 
+                Write-Host ""
                 if ($foundFiles.Count -eq 0) {
-                    Write-Host "$GREEN[信息]$NC 未发现现有的 inno_updater 文件"
+                    Write-Host "$GREEN[信息]$NC 未发现任何 inno_updater 文件"
                 } else {
-                    Write-Host "$GREEN[信息]$NC 共处理了 $($foundFiles.Count) 个 inno_updater 文件"
+                    Write-Host "$GREEN[信息]$NC 处理总结:"
+                    Write-Host "共发现 $($foundFiles.Count) 个 inno_updater 文件:"
+                    foreach ($file in $foundFiles) {
+                        Write-Host "- $file"
+                    }
                 }
+                Write-Host ""
                 
                 # 为主要安装位置创建阻止文件
                 # 这里我们只为最常见的几个位置创建阻止文件，而不是所有可能的位置
