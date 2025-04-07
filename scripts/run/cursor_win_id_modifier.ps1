@@ -428,301 +428,126 @@ try {
     if ($choice -eq "1") {
         Write-Host ""
         Write-Host "$GREEN[信息]$NC 正在处理自动更新..."
+        
+        # 1. 处理 cursor-updater
+        Write-Host ""
+        Write-Host "$YELLOW[步骤 1/2]$NC 处理 cursor-updater..."
         $updaterPath = "$env:LOCALAPPDATA\cursor-updater"
-
-        # 定义手动设置教程
-        function Show-ManualGuide {
-            Write-Host ""
-            Write-Host "$YELLOW[警告]$NC 自动设置失败,请尝试手动操作："
-            Write-Host "$YELLOW手动禁用更新步骤：$NC"
-            Write-Host "1. 以管理员身份打开 PowerShell"
-            Write-Host "2. 复制粘贴以下命令："
-            Write-Host "$BLUE命令1 - 删除现有目录（如果存在）：$NC"
-            Write-Host "Remove-Item -Path `"$updaterPath`" -Force -Recurse -ErrorAction SilentlyContinue"
-            Write-Host ""
-            Write-Host "$BLUE命令2 - 创建阻止文件：$NC"
-            Write-Host "New-Item -Path `"$updaterPath`" -ItemType File -Force | Out-Null"
-            Write-Host ""
-            Write-Host "$BLUE命令3 - 设置只读属性：$NC"
-            Write-Host "Set-ItemProperty -Path `"$updaterPath`" -Name IsReadOnly -Value `$true"
-            Write-Host ""
-            Write-Host "$BLUE命令4 - 设置权限（可选）：$NC"
-            Write-Host "icacls `"$updaterPath`" /inheritance:r /grant:r `"`$($env:USERNAME):(R)`""
-            Write-Host ""
-            Write-Host "$YELLOW验证方法：$NC"
-            Write-Host "1. 运行命令：Get-ItemProperty `"$updaterPath`""
-            Write-Host "2. 确认 IsReadOnly 属性为 True"
-            Write-Host "3. 运行命令：icacls `"$updaterPath`""
-            Write-Host "4. 确认只有读取权限"
-            Write-Host ""
-            Write-Host "$YELLOW[提示]$NC 完成后请重启 Cursor"
-        }
-
+        
         try {
             # 检查cursor-updater是否存在
             if (Test-Path $updaterPath) {
-                # 如果是文件,说明已经创建了阻止更新
                 if ((Get-Item $updaterPath) -is [System.IO.FileInfo]) {
-                    Write-Host "$GREEN[信息]$NC 已创建阻止更新文件,无需再次阻止"
-                    return
-                }
-                # 如果是目录,尝试删除
-                else {
+                    Write-Host "$GREEN[信息]$NC cursor-updater 已被禁用"
+                } else {
                     try {
                         Remove-Item -Path $updaterPath -Force -Recurse -ErrorAction Stop
                         Write-Host "$GREEN[信息]$NC 成功删除 cursor-updater 目录"
                     }
                     catch {
-                        Write-Host "$RED[错误]$NC 删除 cursor-updater 目录失败"
-                        Show-ManualGuide
-                        return
+                        Write-Host "$RED[错误]$NC 删除 cursor-updater 目录失败: $_"
                     }
                 }
             }
 
             # 创建阻止文件
-            try {
-                New-Item -Path $updaterPath -ItemType File -Force -ErrorAction Stop | Out-Null
-                Write-Host "$GREEN[信息]$NC 成功创建阻止文件"
-            }
-            catch {
-                Write-Host "$RED[错误]$NC 创建阻止文件失败"
-                Show-ManualGuide
-                return
-            }
-
-            # 设置文件权限
-            try {
-                # 设置只读属性
-                Set-ItemProperty -Path $updaterPath -Name IsReadOnly -Value $true -ErrorAction Stop
-                
-                # 使用 icacls 设置权限
-                $result = Start-Process "icacls.exe" -ArgumentList "`"$updaterPath`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
-                if ($result.ExitCode -ne 0) {
-                    throw "icacls 命令失败"
+            if (-not (Test-Path $updaterPath)) {
+                try {
+                    New-Item -Path $updaterPath -ItemType File -Force -ErrorAction Stop | Out-Null
+                    Set-ItemProperty -Path $updaterPath -Name IsReadOnly -Value $true -ErrorAction Stop
+                    $result = Start-Process "icacls.exe" -ArgumentList "`"$updaterPath`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
+                    Write-Host "$GREEN[信息]$NC 成功创建并锁定 cursor-updater 阻止文件"
                 }
-                
-                Write-Host "$GREEN[信息]$NC 成功设置文件权限"
-            }
-            catch {
-                Write-Host "$RED[错误]$NC 设置文件权限失败"
-                Show-ManualGuide
-                return
-            }
-
-            # 处理 inno_updater 文件
-            try {
-                # 获取所有可用的驱动器
-                $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
-                
-                # 创建存储所有可能的 inno_updater 位置的数组
-                $innoUpdaterLocations = @(
-                    # 原有的位置
-                    "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
-                    "$env:LOCALAPPDATA\cursor-updater\inno_updater",
-                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
-                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater",
-                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
-                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater",
-                    # 添加 Cursor 主程序目录下的 tools 位置
-                    "$env:LOCALAPPDATA\Programs\cursor\tools\inno_updater.exe",
-                    "$env:LOCALAPPDATA\Programs\cursor\tools\inno_updater",
-                    "$env:LOCALAPPDATA\cursor\tools\inno_updater.exe",
-                    "$env:LOCALAPPDATA\cursor\tools\inno_updater"
-                )
-                
-                # 添加所有可能的驱动器上的 Cursor tools 目录
-                foreach ($drive in $drives) {
-                    # 标准 Program Files 位置
-                    $innoUpdaterLocations += @(
-                        "${drive}Program Files\cursor\tools\inno_updater.exe",
-                        "${drive}Program Files\cursor\tools\inno_updater",
-                        "${drive}Program Files (x86)\cursor\tools\inno_updater.exe",
-                        "${drive}Program Files (x86)\cursor\tools\inno_updater",
-                        # 添加主程序目录下的 tools
-                        "${drive}Program Files\cursor\resources\app\tools\inno_updater.exe",
-                        "${drive}Program Files\cursor\resources\app\tools\inno_updater",
-                        "${drive}Program Files (x86)\cursor\resources\app\tools\inno_updater.exe",
-                        "${drive}Program Files (x86)\cursor\resources\app\tools\inno_updater"
-                    )
-                    
-                    # 自定义安装位置的常见情况
-                    $innoUpdaterLocations += @(
-                        "${drive}cursor\tools\inno_updater.exe",
-                        "${drive}cursor\tools\inno_updater",
-                        "${drive}cursor\resources\app\tools\inno_updater.exe",
-                        "${drive}cursor\resources\app\tools\inno_updater",
-                        "${drive}Apps\cursor\tools\inno_updater.exe",
-                        "${drive}Apps\cursor\tools\inno_updater",
-                        "${drive}Software\cursor\tools\inno_updater.exe",
-                        "${drive}Software\cursor\tools\inno_updater",
-                        # 添加其他可能的自定义位置
-                        "${drive}Applications\cursor\tools\inno_updater.exe",
-                        "${drive}Applications\cursor\tools\inno_updater",
-                        "${drive}Programs\cursor\tools\inno_updater.exe",
-                        "${drive}Programs\cursor\tools\inno_updater"
-                    )
-                }
-                
-                Write-Host "$GREEN[信息]$NC 正在检查 $($innoUpdaterLocations.Count) 个可能的 inno_updater 位置..."
-                
-                # 查找并处理现有的 inno_updater 文件
-                $foundFiles = @()
-                Write-Host ""
-                Write-Host "$YELLOW[警告]$NC 开始查找 inno_updater 文件..."
-                Write-Host ""
-                
-                foreach ($location in $innoUpdaterLocations) {
-                    if (Test-Path $location) {
-                        $foundFiles += $location
-                        $fileInfo = Get-Item $location
-                        Write-Host "$YELLOW----------------------------------------$NC"
-                        Write-Host "$YELLOW[发现]$NC inno_updater 文件:"
-                        Write-Host "路径: $location"
-                        Write-Host "大小: $([math]::Round($fileInfo.Length/1KB, 2)) KB"
-                        Write-Host "修改时间: $($fileInfo.LastWriteTime)"
-                        Write-Host "$YELLOW----------------------------------------$NC"
-                        Write-Host ""
-                        
-                        # 尝试删除文件
-                        try {
-                            Remove-Item -Path $location -Force -ErrorAction Stop
-                            Write-Host "$GREEN[信息]$NC 成功删除 inno_updater 文件: $location"
-                        }
-                        catch {
-                            Write-Host "$RED[错误]$NC 无法删除 inno_updater 文件，尝试禁用: $location"
-                            
-                            # 如果无法删除，尝试创建空文件并设置为只读
-                            try {
-                                # 先备份原始文件（如果需要）
-                                $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Split-Path -Leaf $location)"
-                                Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
-                                Write-Host "$GREEN[信息]$NC 已备份原始文件到: $backupLocation"
-                                
-                                # 清空文件内容
-                                Set-Content -Path $location -Value "" -Force
-                                
-                                # 设置为只读
-                                Set-ItemProperty -Path $location -Name IsReadOnly -Value $true
-                                
-                                # 设置权限
-                                $innoResult = Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
-                                
-                                Write-Host "$GREEN[信息]$NC 成功禁用 inno_updater 文件: $location"
-                            }
-                            catch {
-                                Write-Host "$RED[错误]$NC 无法禁用 inno_updater 文件: $location"
-                                Write-Host "错误信息: $_"
-                            }
-                        }
-                    }
-                }
-                
-                Write-Host ""
-                if ($foundFiles.Count -eq 0) {
-                    Write-Host "$GREEN[信息]$NC 未发现任何 inno_updater 文件"
-                } else {
-                    Write-Host "$GREEN[信息]$NC 处理总结:"
-                    Write-Host "共发现 $($foundFiles.Count) 个 inno_updater 文件:"
-                    foreach ($file in $foundFiles) {
-                        Write-Host "- $file"
-                    }
-                }
-                Write-Host ""
-                
-                # 为主要安装位置创建阻止文件
-                # 这里我们只为最常见的几个位置创建阻止文件，而不是所有可能的位置
-                $blockLocations = @(
-                    "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
-                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
-                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
-                    "$($env:SystemDrive)\Program Files\cursor\tools\inno_updater.exe",
-                    "$($env:SystemDrive)\Program Files (x86)\cursor\tools\inno_updater.exe"
-                )
-                
-                # 如果用户的系统盘不是C盘，添加C盘位置
-                if ($env:SystemDrive -ne "C:") {
-                    $blockLocations += @(
-                        "C:\Program Files\cursor\tools\inno_updater.exe",
-                        "C:\Program Files (x86)\cursor\tools\inno_updater.exe"
-                    )
-                }
-                
-                # 查找可用的系统驱动器并添加
-                $systemDrives = @("D:", "E:", "F:")
-                foreach ($drive in $systemDrives) {
-                    if (Test-Path $drive) {
-                        $blockLocations += @(
-                            "${drive}\Program Files\cursor\tools\inno_updater.exe",
-                            "${drive}\Program Files (x86)\cursor\tools\inno_updater.exe",
-                            "${drive}\cursor\tools\inno_updater.exe"
-                        )
-                    }
-                }
-                
-                # 创建阻止文件
-                foreach ($location in $blockLocations) {
-                    if (-not (Test-Path $location)) {
-                        $folder = Split-Path -Path $location -Parent
-                        
-                        # 确保父文件夹存在
-                        if (-not (Test-Path $folder)) {
-                            try {
-                                New-Item -Path $folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-                                Write-Host "$GREEN[信息]$NC 创建目录: $folder"
-                            }
-                            catch {
-                                # 忽略错误并继续
-                                Write-Host "$YELLOW[警告]$NC 无法创建目录 $folder : $_"
-                                continue
-                            }
-                        }
-                        
-                        try {
-                            # 创建空文件
-                            New-Item -Path $location -ItemType File -Force -ErrorAction Stop | Out-Null
-                            
-                            # 设置为只读
-                            Set-ItemProperty -Path $location -Name IsReadOnly -Value $true
-                            
-                            # 设置权限
-                            Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru | Out-Null
-                            
-                            Write-Host "$GREEN[信息]$NC 成功创建阻止文件: $location"
-                        }
-                        catch {
-                            Write-Host "$YELLOW[警告]$NC 无法创建阻止文件 $location : $_"
-                        }
-                    }
-                }
-                
-                Write-Host "$GREEN[信息]$NC inno_updater 处理完成"
-            }
-            catch {
-                Write-Host "$RED[错误]$NC 处理 inno_updater 时发生错误: $_"
-            }
-
-            # 验证设置
-            try {
-                $fileInfo = Get-ItemProperty $updaterPath
-                if (-not $fileInfo.IsReadOnly) {
-                    Write-Host "$RED[错误]$NC 验证失败：文件权限设置可能未生效"
-                    Show-ManualGuide
-                    return
+                catch {
+                    Write-Host "$RED[错误]$NC 创建 cursor-updater 阻止文件失败: $_"
                 }
             }
-            catch {
-                Write-Host "$RED[错误]$NC 验证设置失败"
-                Show-ManualGuide
-                return
-            }
-
-            Write-Host "$GREEN[信息]$NC 成功禁用自动更新"
         }
         catch {
-            Write-Host "$RED[错误]$NC 发生未知错误: $_"
-            Show-ManualGuide
+            Write-Host "$RED[错误]$NC 处理 cursor-updater 时发生错误: $_"
         }
+
+        # 2. 处理 inno_updater
+        Write-Host ""
+        Write-Host "$YELLOW[步骤 2/2]$NC 处理 inno_updater..."
+        
+        try {
+            # 获取所有可用的驱动器
+            $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+            
+            # 创建存储所有可能的 inno_updater 位置的数组
+            $innoUpdaterLocations = @(
+                # LocalAppData 位置
+                "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
+                "$env:LOCALAPPDATA\Programs\cursor\tools\inno_updater.exe",
+                "$env:LOCALAPPDATA\cursor\tools\inno_updater.exe"
+            )
+            
+            # 添加所有可能的驱动器上的位置
+            foreach ($drive in $drives) {
+                $innoUpdaterLocations += @(
+                    "${drive}Program Files\cursor\tools\inno_updater.exe",
+                    "${drive}Program Files (x86)\cursor\tools\inno_updater.exe",
+                    "${drive}cursor\tools\inno_updater.exe"
+                )
+            }
+            
+            Write-Host "$GREEN[信息]$NC 正在检查 $($innoUpdaterLocations.Count) 个可能的 inno_updater 位置..."
+            
+            # 查找并处理现有的 inno_updater 文件
+            $foundFiles = @()
+            foreach ($location in $innoUpdaterLocations) {
+                if (Test-Path $location) {
+                    $foundFiles += $location
+                    $fileInfo = Get-Item $location
+                    Write-Host ""
+                    Write-Host "$YELLOW----------------------------------------$NC"
+                    Write-Host "$YELLOW[发现]$NC inno_updater 文件:"
+                    Write-Host "路径: $location"
+                    Write-Host "大小: $([math]::Round($fileInfo.Length/1KB, 2)) KB"
+                    Write-Host "修改时间: $($fileInfo.LastWriteTime)"
+                    Write-Host "$YELLOW----------------------------------------$NC"
+                    
+                    try {
+                        # 备份文件
+                        $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Split-Path -Leaf $location)"
+                        Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
+                        Write-Host "$GREEN[信息]$NC 已备份到: $backupLocation"
+                        
+                        # 尝试删除或禁用文件
+                        if (Remove-Item -Path $location -Force -ErrorAction Stop) {
+                            Write-Host "$GREEN[信息]$NC 成功删除文件"
+                        }
+                    }
+                    catch {
+                        Write-Host "$RED[错误]$NC 处理文件失败: $_"
+                    }
+                }
+            }
+            
+            # 显示处理结果
+            Write-Host ""
+            if ($foundFiles.Count -eq 0) {
+                Write-Host "$GREEN[信息]$NC 未发现 inno_updater 文件"
+            } else {
+                Write-Host "$GREEN[信息]$NC 处理总结:"
+                Write-Host "共发现并处理了 $($foundFiles.Count) 个 inno_updater 文件:"
+                foreach ($file in $foundFiles) {
+                    Write-Host "- $file"
+                }
+            }
+        }
+        catch {
+            Write-Host "$RED[错误]$NC 处理 inno_updater 时发生错误: $_"
+        }
+
+        # 最终状态报告
+        Write-Host ""
+        Write-Host "$GREEN[完成]$NC 自动更新处理总结:"
+        Write-Host "1. cursor-updater: $(if (Test-Path $updaterPath) { "已禁用" } else { "处理失败" })"
+        Write-Host "2. inno_updater: 发现并处理了 $($foundFiles.Count) 个文件"
+        Write-Host ""
+        Write-Host "$YELLOW[提示]$NC 请重启 Cursor 以确保更改生效"
     }
     else {
         Write-Host "$GREEN[信息]$NC 保持默认设置，不进行更改"
