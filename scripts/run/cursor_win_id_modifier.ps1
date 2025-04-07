@@ -512,8 +512,12 @@ try {
 
             # 处理 inno_updater 文件
             try {
-                # 检查可能的 inno_updater 位置
+                # 获取所有可用的驱动器
+                $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+                
+                # 创建存储所有可能的 inno_updater 位置的数组
                 $innoUpdaterLocations = @(
+                    # 原有的位置
                     "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
                     "$env:LOCALAPPDATA\cursor-updater\inno_updater",
                     "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
@@ -522,8 +526,34 @@ try {
                     "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater"
                 )
                 
+                # 添加所有可能的驱动器上的 Cursor tools 目录
+                foreach ($drive in $drives) {
+                    # 标准 Program Files 位置
+                    $innoUpdaterLocations += @(
+                        "${drive}Program Files\cursor\tools\inno_updater.exe",
+                        "${drive}Program Files\cursor\tools\inno_updater",
+                        "${drive}Program Files (x86)\cursor\tools\inno_updater.exe",
+                        "${drive}Program Files (x86)\cursor\tools\inno_updater"
+                    )
+                    
+                    # 自定义安装位置的常见情况
+                    $innoUpdaterLocations += @(
+                        "${drive}cursor\tools\inno_updater.exe",
+                        "${drive}cursor\tools\inno_updater",
+                        "${drive}Apps\cursor\tools\inno_updater.exe",
+                        "${drive}Apps\cursor\tools\inno_updater",
+                        "${drive}Software\cursor\tools\inno_updater.exe",
+                        "${drive}Software\cursor\tools\inno_updater"
+                    )
+                }
+                
+                Write-Host "$GREEN[信息]$NC 正在检查 $($innoUpdaterLocations.Count) 个可能的 inno_updater 位置..."
+                
+                # 查找并处理现有的 inno_updater 文件
+                $foundFiles = @()
                 foreach ($location in $innoUpdaterLocations) {
                     if (Test-Path $location) {
+                        $foundFiles += $location
                         Write-Host "$YELLOW[警告]$NC 发现 inno_updater 文件: $location"
                         
                         # 尝试删除文件
@@ -537,7 +567,7 @@ try {
                             # 如果无法删除，尝试创建空文件并设置为只读
                             try {
                                 # 先备份原始文件（如果需要）
-                                $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+                                $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Split-Path -Leaf $location)"
                                 Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
                                 
                                 # 清空文件内容
@@ -558,8 +588,44 @@ try {
                     }
                 }
                 
-                # 创建阻止文件在各个可能位置
-                foreach ($location in $innoUpdaterLocations) {
+                if ($foundFiles.Count -eq 0) {
+                    Write-Host "$GREEN[信息]$NC 未发现现有的 inno_updater 文件"
+                } else {
+                    Write-Host "$GREEN[信息]$NC 共处理了 $($foundFiles.Count) 个 inno_updater 文件"
+                }
+                
+                # 为主要安装位置创建阻止文件
+                # 这里我们只为最常见的几个位置创建阻止文件，而不是所有可能的位置
+                $blockLocations = @(
+                    "$env:LOCALAPPDATA\cursor-updater\inno_updater.exe",
+                    "$env:LOCALAPPDATA\Programs\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
+                    "$env:LOCALAPPDATA\cursor\resources\app\node_modules.asar.unpacked\@electron\inno_updater.exe",
+                    "$($env:SystemDrive)\Program Files\cursor\tools\inno_updater.exe",
+                    "$($env:SystemDrive)\Program Files (x86)\cursor\tools\inno_updater.exe"
+                )
+                
+                # 如果用户的系统盘不是C盘，添加C盘位置
+                if ($env:SystemDrive -ne "C:") {
+                    $blockLocations += @(
+                        "C:\Program Files\cursor\tools\inno_updater.exe",
+                        "C:\Program Files (x86)\cursor\tools\inno_updater.exe"
+                    )
+                }
+                
+                # 查找可用的系统驱动器并添加
+                $systemDrives = @("D:", "E:", "F:")
+                foreach ($drive in $systemDrives) {
+                    if (Test-Path $drive) {
+                        $blockLocations += @(
+                            "${drive}\Program Files\cursor\tools\inno_updater.exe",
+                            "${drive}\Program Files (x86)\cursor\tools\inno_updater.exe",
+                            "${drive}\cursor\tools\inno_updater.exe"
+                        )
+                    }
+                }
+                
+                # 创建阻止文件
+                foreach ($location in $blockLocations) {
                     if (-not (Test-Path $location)) {
                         $folder = Split-Path -Path $location -Parent
                         
@@ -567,9 +633,11 @@ try {
                         if (-not (Test-Path $folder)) {
                             try {
                                 New-Item -Path $folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                                Write-Host "$GREEN[信息]$NC 创建目录: $folder"
                             }
                             catch {
                                 # 忽略错误并继续
+                                Write-Host "$YELLOW[警告]$NC 无法创建目录 $folder : $_"
                                 continue
                             }
                         }
