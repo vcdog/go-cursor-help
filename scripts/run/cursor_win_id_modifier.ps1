@@ -519,18 +519,48 @@ try {
                     Write-Host "$YELLOW----------------------------------------$NC"
                     
                     try {
-                        # 备份文件
+                        # 1. 备份原始文件
                         $backupLocation = "$BACKUP_DIR\inno_updater_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$(Split-Path -Leaf $location)"
-                        Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction SilentlyContinue
+                        Copy-Item -Path $location -Destination $backupLocation -Force -ErrorAction Stop
                         Write-Host "$GREEN[信息]$NC 已备份到: $backupLocation"
                         
-                        # 尝试删除或禁用文件
-                        if (Remove-Item -Path $location -Force -ErrorAction Stop) {
-                            Write-Host "$GREEN[信息]$NC 成功删除文件"
+                        # 2. 删除原始文件
+                        Remove-Item -Path $location -Force -ErrorAction Stop
+                        Write-Host "$GREEN[信息]$NC 成功删除原始文件"
+                        
+                        # 3. 创建空的只读文件
+                        try {
+                            # 创建空文件
+                            New-Item -Path $location -ItemType File -Force -ErrorAction Stop | Out-Null
+                            Write-Host "$GREEN[信息]$NC 创建新的空文件"
+                            
+                            # 设置只读属性
+                            Set-ItemProperty -Path $location -Name IsReadOnly -Value $true -ErrorAction Stop
+                            Write-Host "$GREEN[信息]$NC 设置文件为只读"
+                            
+                            # 设置严格的文件权限
+                            $result = Start-Process "icacls.exe" -ArgumentList "`"$location`" /inheritance:r /grant:r `"$($env:USERNAME):(R)`"" -Wait -NoNewWindow -PassThru
+                            if ($result.ExitCode -eq 0) {
+                                Write-Host "$GREEN[信息]$NC 成功设置文件权限"
+                            } else {
+                                Write-Host "$YELLOW[警告]$NC 设置文件权限可能不完整"
+                            }
+                            
+                            # 验证文件状态
+                            $newFileInfo = Get-Item $location
+                            if ($newFileInfo.IsReadOnly) {
+                                Write-Host "$GREEN[成功]$NC 已成功创建只读的阻止文件: $location"
+                            } else {
+                                Write-Host "$YELLOW[警告]$NC 文件创建成功，但可能未完全锁定"
+                            }
+                        }
+                        catch {
+                            Write-Host "$RED[错误]$NC 创建阻止文件失败: $_"
                         }
                     }
                     catch {
                         Write-Host "$RED[错误]$NC 处理文件失败: $_"
+                        Write-Host "错误详情: $_"
                     }
                 }
             }
