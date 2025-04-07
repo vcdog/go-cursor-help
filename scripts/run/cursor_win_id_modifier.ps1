@@ -474,6 +474,7 @@ try {
         try {
             # 获取所有可用的驱动器
             $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+            Write-Host "$BLUE[调试]$NC 检测到的驱动器: $($drives -join ', ')"
             
             # 创建存储所有可能的 inno_updater 位置的数组
             $innoUpdaterLocations = @(
@@ -485,11 +486,19 @@ try {
             
             # 添加所有可能的驱动器上的位置
             foreach ($drive in $drives) {
+                # 确保驱动器路径格式正确（移除末尾的反斜杠）
+                $drivePath = $drive.TrimEnd('\')
+                
+                Write-Host "$BLUE[调试]$NC 正在检查驱动器: $drivePath"
+                
                 $innoUpdaterLocations += @(
-                    "${drive}Program Files\cursor\tools\inno_updater.exe",
-                    "${drive}Program Files (x86)\cursor\tools\inno_updater.exe",
-                    "${drive}cursor\tools\inno_updater.exe"
+                    "${drivePath}\Program Files\cursor\tools\inno_updater.exe",
+                    "${drivePath}\Program Files (x86)\cursor\tools\inno_updater.exe",
+                    "${drivePath}\cursor\tools\inno_updater.exe"
                 )
+                
+                # 输出正在检查的具体路径
+                Write-Host "$BLUE[调试]$NC 检查路径: ${drivePath}\Program Files (x86)\cursor\tools\inno_updater.exe"
             }
             
             Write-Host "$GREEN[信息]$NC 正在检查 $($innoUpdaterLocations.Count) 个可能的 inno_updater 位置..."
@@ -497,6 +506,7 @@ try {
             # 查找并处理现有的 inno_updater 文件
             $foundFiles = @()
             foreach ($location in $innoUpdaterLocations) {
+                Write-Host "$BLUE[调试]$NC 检查路径: $location"
                 if (Test-Path $location) {
                     $foundFiles += $location
                     $fileInfo = Get-Item $location
