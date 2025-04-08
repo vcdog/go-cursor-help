@@ -586,6 +586,94 @@ try {
         Write-Host "$GREEN[完成]$NC 自动更新处理总结:"
         Write-Host "1. cursor-updater: $(if (Test-Path $updaterPath) { "已禁用" } else { "处理失败" })"
         Write-Host "2. inno_updater: 发现并处理了 $($foundFiles.Count) 个文件"
+        
+        # 添加禁用检查更新功能的步骤
+        Write-Host ""
+        Write-Host "$YELLOW[步骤 3/3]$NC 禁用检查更新功能..."
+
+        # 定义可能的配置文件路径
+        $configPaths = @(
+            "$env:APPDATA\Cursor\User\settings.json",
+            "$env:LOCALAPPDATA\Programs\cursor\resources\app\settings.json",
+            "$env:LOCALAPPDATA\cursor\resources\app\settings.json"
+        )
+
+        $updateConfigAdded = $false
+
+        # 检查并修改设置文件
+        foreach ($configPath in $configPaths) {
+            if (Test-Path $configPath) {
+                try {
+                    Write-Host "$GREEN[信息]$NC 找到配置文件: $configPath"
+                    
+                    # 读取配置文件
+                    $configContent = Get-Content -Path $configPath -Raw -ErrorAction Stop
+                    
+                    # 检查文件是否为空
+                    if ([string]::IsNullOrWhiteSpace($configContent)) {
+                        $jsonConfig = @{}
+                    } else {
+                        try {
+                            $jsonConfig = $configContent | ConvertFrom-Json
+                        } catch {
+                            $jsonConfig = @{}
+                        }
+                    }
+                    
+                    # 备份原始文件
+                    $backupPath = "$BACKUP_DIR\settings_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+                    Copy-Item -Path $configPath -Destination $backupPath -Force
+                    Write-Host "$GREEN[信息]$NC 已备份设置文件到: $backupPath"
+                    
+                    # 添加禁用更新的配置
+                    $jsonConfig | Add-Member -Type NoteProperty -Name "update.mode" -Value "none" -Force
+                    $jsonConfig | Add-Member -Type NoteProperty -Name "update.enableWindowsBackgroundUpdates" -Value $false -Force
+                    $jsonConfig | Add-Member -Type NoteProperty -Name "update.showCheckForUpdatesButton" -Value $false -Force
+                    
+                    # 保存修改后的配置
+                    $jsonConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $configPath
+                    Write-Host "$GREEN[成功]$NC 已修改配置文件禁用检查更新功能"
+                    $updateConfigAdded = $true
+                }
+                catch {
+                    Write-Host "$RED[错误]$NC 修改配置文件失败: $_"
+                }
+            }
+        }
+
+        # 如果没有找到任何配置文件，尝试创建一个新的
+        if (-not $updateConfigAdded) {
+            # 使用最常见的路径
+            $defaultConfigPath = "$env:APPDATA\Cursor\User\settings.json"
+            try {
+                # 确保目录存在
+                $configDir = Split-Path -Parent $defaultConfigPath
+                if (-not (Test-Path $configDir)) {
+                    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+                }
+                
+                # 创建新的配置文件
+                $newConfig = @{
+                    "update.mode" = "none"
+                    "update.enableWindowsBackgroundUpdates" = $false
+                    "update.showCheckForUpdatesButton" = $false
+                }
+                
+                $newConfig | ConvertTo-Json | Set-Content -Path $defaultConfigPath
+                Write-Host "$GREEN[成功]$NC 已创建新的配置文件: $defaultConfigPath"
+                $updateConfigAdded = $true
+            }
+            catch {
+                Write-Host "$RED[错误]$NC 创建配置文件失败: $_"
+            }
+        }
+
+        # 更新最终状态报告包含检查更新功能的状态
+        Write-Host ""
+        Write-Host "$GREEN[完成]$NC 自动更新处理总结:"
+        Write-Host "1. cursor-updater: $(if (Test-Path $updaterPath) { "已禁用" } else { "处理失败" })"
+        Write-Host "2. inno_updater: 发现并处理了 $($foundFiles.Count) 个文件"
+        Write-Host "3. 检查更新功能: $(if ($updateConfigAdded) { "已禁用" } else { "处理失败" })"
         Write-Host ""
         Write-Host "$YELLOW[提示]$NC 请重启 Cursor 以确保更改生效"
     }
