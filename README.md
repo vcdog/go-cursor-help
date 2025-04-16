@@ -547,3 +547,63 @@ copies or substantial portions of the Software.
 
 </details>
 
+# Cursor 遥测配置修复工具
+
+## 问题描述
+
+在使用 Cursor IDE 时，可能会遇到以下错误：
+
+```
+[错误] 主要操作失败: 处理 JSON 失败: Exception setting "telemetry.macMachineId": "The property 'telemetry.macMachineId' cannot be found on this object. Verify that the property exists and can be set."
+```
+
+这个错误发生在 Cursor 尝试设置遥测数据中的机器 ID 时，但属性路径不正确，导致操作失败。
+
+## 原因分析
+
+此错误可能由以下原因引起：
+
+1. **配置结构不匹配**：Cursor 的配置文件结构与代码期望不一致
+2. **平台特定问题**：在 Windows 上运行，但代码尝试设置 Mac 特定的属性
+3. **配置初始化不完整**：遥测对象可能未正确初始化
+4. **Cursor 版本更新**：新版本可能改变了配置结构
+
+## 解决方案
+
+本项目提供了一个简单的 Go 程序 (`fix_telemetry.go`)，可以解决此问题：
+
+1. 自动查找 Cursor 配置文件
+2. 分析并修复配置结构
+3. 确保所有平台特定的机器 ID 属性都被正确设置
+4. 保存更新后的配置
+
+## 使用方法
+
+1. 确保您已安装 Go 运行环境
+2. 运行修复程序：
+
+```bash
+go run fix_telemetry.go
+```
+
+3. 程序会自动:
+   - 在常见位置查找 Cursor 配置文件
+   - 备份原始配置
+   - 修复配置结构
+   - 保存更新的配置文件
+
+## 文件说明
+
+- `fix_telemetry.go`: 主修复程序
+- `analysis.md`: 问题分析和解决方案详细说明
+
+## 注意事项
+
+- 程序会在修改配置前创建备份
+- 如果无法找到配置文件，程序会显示相应消息
+- 这是针对特定错误的修复，不会影响 Cursor 的其他功能
+
+## 贡献
+
+如果您发现任何问题或有改进建议，请随时提交 issue 或 pull request。
+
